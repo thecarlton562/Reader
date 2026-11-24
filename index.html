@@ -98,6 +98,8 @@ details[open] .chev{transform:rotate(180deg)}
       <input id="rate" type="range" min="0.7" max="2" step="0.1" value="1">
       <label for="size">Text size</label>
       <input id="size" type="range" min="0.9" max="1.6" step="0.1" value="1">
+      <label for="gpu">Speed</label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="gpu"> Use graphics chip (faster, ~330 MB download)</label>
       <p class="note" id="engineNote"></p>
     </div>
   </details>
@@ -125,6 +127,7 @@ const S = {
   engine: store.get('engine') || 'kokoro',
   rate: parseFloat(store.get('rate')) || 1,
   voice: { system: store.get('v_system') || '', kokoro: store.get('v_kokoro') || 'af_heart' },
+  gpu: (store.get('gpu') === null ? (!!navigator.gpu && !/iPhone|iPad|iPod/.test(navigator.userAgent)) : store.get('gpu') === '1'),
   key: null, tts: null, ttsP: null, q: Promise.resolve(), cache: new Map(), ctx: null, src: null, utt: null, keep: null
 };
 
@@ -343,21 +346,35 @@ function keepAudioSession(on){
   } catch (e) {}
 }
 
+const KOKORO_MODEL = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 function ensureKokoro(){
   if (S.tts) return Promise.resolve(S.tts);
   if (!S.ttsP){
     S.ttsP = (async () => {
       setStatus('Loading AI voice…');
       const { KokoroTTS } = await import(KOKORO);
-      const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-        dtype: 'q8', device: 'wasm',
-        progress_callback: p => { if (p.status === 'progress') setStatus(`Downloading AI voice… ${Math.round(p.progress || 0)}% (first time only)`); }
-      });
+      const load = cfg => KokoroTTS.from_pretrained(KOKORO_MODEL, { ...cfg,
+        progress_callback: p => { if (p.status === 'progress') setStatus(`Downloading AI voice… ${Math.round(p.progress || 0)}% (first time only)`); } });
+      let tts = null;
+      if (S.gpu && navigator.gpu){
+        try {
+          tts = await load({ dtype: 'fp32', device: 'webgpu' });
+          await tts.generate('Ready.', { voice: S.voice.kokoro }); // warm-up run
+        } catch (e){
+          console.warn('WebGPU failed, using CPU', e);
+          tts = null;
+          setStatus('Graphics chip unavailable, switching to the lighter mode…');
+        }
+      }
+      if (!tts){
+        tts = await load({ dtype: 'q8', device: 'wasm' });
+        S.usedGpu = false;
+      } else S.usedGpu = true;
       S.tts = tts; setStatus('');
       return tts;
     })().catch(e => {
       S.ttsP = null;
-      throw new Error('Could not load the AI voice (' + (e.message || e) + '). If you opened this inside claude.ai, downloads are blocked there. Host this page yourself or switch to iPhone voices.');
+      throw new Error('Could not load the AI voice (' + (e.message || e) + '). Check your connection, or switch to iPhone voices.');
     });
   }
   return S.ttsP;
@@ -368,7 +385,7 @@ function genAudio(i){
     const p = S.q = S.q.catch(() => {}).then(async () => (await ensureKokoro()).generate(S.segs[i].t, { voice: S.voice.kokoro, speed: S.rate }));
     S.cache.set(k, p);
     p.catch(() => S.cache.delete(k));
-    if (S.cache.size > 6) S.cache.delete(S.cache.keys().next().value);
+    if (S.cache.size > 10) S.cache.delete(S.cache.keys().next().value);
   }
   return S.cache.get(k);
 }
@@ -378,7 +395,7 @@ async function speakKokoro(i, tok){
   try { a = await genAudio(i); } finally { clearTimeout(wait); }
   if (tok !== S.token) return;
   setStatus('');
-  if (i + 1 < S.segs.length) genAudio(i + 1).catch(() => {});
+  for (let k = 1; k <= 3 && i + k < S.segs.length; k++) genAudio(i + k).catch(() => {});
   const ctx = audioCtx();
   const buf = ctx.createBuffer(1, a.audio.length, a.sampling_rate);
   buf.copyToChannel(a.audio, 0);
@@ -493,6 +510,13 @@ $('#testVoice').onclick = () => {
   if (S.engine !== 'system') { startPlayback(S.i); return; }
   const v = speechSynthesis.getVoices().find(v => v.voiceURI === S.voice.system);
   speakSystem('Hello, this is ' + (v ? v.name.replace(/\(.*\)/, '').trim() : 'the default voice') + '.').catch(err => setStatus(err.message, true));
+};
+$('#gpu').checked = S.gpu;
+$('#gpu').onchange = e => {
+  stopPlayback();
+  S.gpu = e.target.checked; store.set('gpu', S.gpu ? '1' : '0');
+  S.tts = null; S.ttsP = null; S.cache.clear();
+  if (S.engine === 'kokoro') ensureKokoro().catch(err => setStatus(err.message, true));
 };
 $('#rate').oninput = e => {
   S.rate = parseFloat(e.target.value); store.set('rate', String(S.rate));
