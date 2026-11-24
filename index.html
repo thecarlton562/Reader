@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Read Aloud — PDF & EPUB</title>
+<style>
+:root{
+  --bg:#faf8f4;--fg:#1f1d1a;--muted:#6f6a62;--card:#fff;--line:#e5e0d6;
+  --accent:#2f5d50;--accent-fg:#fff;--hl:#ffe9a8;--err:#b3261e;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#161513;--fg:#ece8e0;--muted:#9a948a;--card:#201e1b;--line:#33302b;
+  --accent:#6fb59f;--accent-fg:#10201b;--hl:#4a3f12;--err:#ff8a80}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:17px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+header{display:flex;align-items:center;gap:10px;padding:max(10px,env(safe-area-inset-top)) 14px 10px;
+  border-bottom:1px solid var(--line);min-height:56px}
+header h1{font-size:16px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+button,select{font:inherit;color:inherit}
+.btn{background:var(--card);border:1px solid var(--line);border-radius:12px;min-height:44px;padding:0 16px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px 18px 24px;position:relative}
+#empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;height:100%;text-align:center;color:var(--muted);padding:0 24px}
+#empty h2{color:var(--fg);margin:0;font-size:22px}
+#empty p{margin:0;max-width:30ch}
+#empty .btn{font-size:18px;min-height:54px;padding:0 28px}
+body.loaded #empty{display:none}
+#text{display:none;max-width:42rem;margin:0 auto;font-size:calc(17px * var(--scale,1));line-height:1.65}
+body.loaded #text{display:block}
+#text span{cursor:pointer;border-radius:4px;padding:1px 0;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+#text span.para{display:inline-block;width:100%;height:0;margin:0;padding:0}
+#text span.cur{background:var(--hl)}
+#status{padding:8px 16px;font-size:14px;color:var(--muted);text-align:center;display:none}
+#status.show{display:block}
+#status.err{color:var(--err)}
+footer{border-top:1px solid var(--line);background:var(--card);padding:10px 14px max(12px,env(safe-area-inset-bottom));display:none}
+body.loaded footer{display:block}
+.row{display:flex;align-items:center;gap:10px}
+.transport{justify-content:center;gap:18px;margin-bottom:10px}
+.round{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);background:var(--bg);font-size:20px;cursor:pointer;display:grid;place-items:center}
+.round.main{width:68px;height:68px;background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-size:26px}
+.round:disabled{opacity:.4}
+#sec{flex:1;min-width:0;min-height:44px;border-radius:12px;border:1px solid var(--line);background:var(--bg);padding:0 10px}
+#prog{width:100%;height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px}
+#prog i{display:block;height:100%;width:0;background:var(--accent)}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--muted);font-size:14px;min-height:32px;display:flex;align-items:center}
+.opts{display:grid;grid-template-columns:auto 1fr;gap:10px 12px;align-items:center;font-size:15px;padding-top:6px}
+.opts select,.opts input[type=range]{width:100%;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--bg);padding:0 8px}
+.opts input[type=range]{padding:0;border:0;background:none}
+.note{grid-column:1/-1;color:var(--muted);font-size:13px;margin:0}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Read Aloud</h1>
+  <button class="btn" id="openTop" type="button">Open file</button>
+</header>
+<div id="status" role="status" aria-live="polite"></div>
+<main id="main">
+  <div id="empty">
+    <h2>Read a document aloud</h2>
+    <p>Open a PDF or EPUB and listen with a free, natural-sounding voice.</p>
+    <button class="btn primary" id="openBig" type="button">Choose PDF or EPUB</button>
+  </div>
+  <div id="text"></div>
+</main>
+<footer>
+  <div id="prog"><i></i></div>
+  <div class="row transport">
+    <button class="round" id="prev" type="button" aria-label="Previous sentence">⏮</button>
+    <button class="round main" id="play" type="button" aria-label="Play">▶</button>
+    <button class="round" id="next" type="button" aria-label="Next sentence">⏭</button>
+  </div>
+  <div class="row"><select id="sec" aria-label="Jump to section"></select></div>
+  <details>
+    <summary>Voice, speed &amp; text size</summary>
+    <div class="opts">
+      <label for="engine">Engine</label>
+      <select id="engine">
+        <option value="system">iPhone voices (instant, offline)</option>
+        <option value="kokoro">Kokoro AI voice (free, ~90 MB download)</option>
+      </select>
+      <label for="voice">Voice</label>
+      <select id="voice"></select>
+      <span></span><button class="btn" id="testVoice" type="button">Test this voice</button>
+      <label for="rate">Speed <span id="rateLbl">1.0×</span></label>
+      <input id="rate" type="range" min="0.7" max="2" step="0.1" value="1">
+      <label for="size">Text size</label>
+      <input id="size" type="range" min="0.9" max="1.6" step="0.1" value="1">
+      <p class="note" id="engineNote"></p>
+    </div>
+  </details>
+</footer>
+<input id="file" type="file" accept=".pdf,.epub,application/pdf,application/epub+zip" hidden>
+
+<script>
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const KOKORO = 'https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm';
+const KOKORO_VOICES = [
+  ['af_heart','Heart (US, female)'],['af_bella','Bella (US, female)'],['af_nicole','Nicole (US, female)'],
+  ['af_sarah','Sarah (US, female)'],['am_michael','Michael (US, male)'],['am_adam','Adam (US, male)'],
+  ['bf_emma','Emma (UK, female)'],['bm_george','George (UK, male)']
+];
+
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+};
+const S = {
+  segs: [], secs: [], i: 0, sec: -1, playing: false, token: 0,
+  engine: store.get('engine') || 'kokoro',
+  rate: parseFloat(store.get('rate')) || 1,
+  voice: { system: store.get('v_system') || '', kokoro: store.get('v_kokoro') || 'af_heart' },
+  key: null, tts: null, ttsP: null, q: Promise.resolve(), cache: new Map(), ctx: null, src: null, utt: null, keep: null
+};
+
+/* ---------- helpers ---------- */
+function setStatus(msg, err){
+  const el = $('#status');
+  el.textContent = msg || '';
+  el.classList.toggle('show', !!msg);
+  el.classList.toggle('err', !!err);
+}
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res;
+    s.onerror = () => rej(new Error('Could not load a required library. Check your connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---------- text splitting ---------- */
+const ABBR = /\b(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|No|Fig|Inc|Ltd|Co|e\.g|i\.e)\.$/i;
+function splitSentences(p){
+  const raw = p.match(/.+?(?:[.!?…]+["”’)\]]*(?=\s|$)|$)/gs) || [p];
+  const merged = [];
+  for (const piece of raw.map(s => s.trim()).filter(Boolean)){
+    const last = merged[merged.length - 1];
+    if (last && (ABBR.test(last) || last.length < 25)) merged[merged.length - 1] = last + ' ' + piece;
+    else merged.push(piece);
+  }
+  const out = [];
+  for (let t of merged){
+    while (t.length > 320){
+      let cut = Math.max(t.lastIndexOf(', ', 300), t.lastIndexOf('; ', 300), t.lastIndexOf(': ', 300));
+      if (cut < 120) cut = t.lastIndexOf(' ', 300);
+      if (cut < 1) cut = 300;
+      out.push(t.slice(0, cut + 1).trim());
+      t = t.slice(cut + 1).trim();
+    }
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+/* ---------- parsing ---------- */
+async function parsePdf(buf){
+  if (!window.pdfjsLib){
+    await loadScript(PDFJS);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+  }
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const secs = [];
+  for (let p = 1; p <= pdf.numPages; p++){
+    setStatus(`Reading page ${p} of ${pdf.numPages}…`);
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    let t = '', lastY = null;
+    for (const it of tc.items){
+      if (!('str' in it)) continue;
+      const y = it.transform ? it.transform[5] : null;
+      if (lastY !== null && y !== null && Math.abs(y - lastY) > 2 && t && !/\s$/.test(t)){
+        if (/\w-$/.test(t)) t = t.slice(0, -1); else t += ' ';
+      }
+      t += it.str;
+      if (it.hasEOL){ if (/\w-$/.test(t)) t = t.slice(0, -1); else t += ' '; }
+      if (y !== null) lastY = y;
+    }
+    t = t.replace(/\s+/g, ' ').trim();
+    if (t.length > 1) secs.push({ title: 'Page ' + p, paras: [t] });
+  }
+  return secs;
+}
+
+function htmlToParas(html){
+  let doc = new DOMParser().parseFromString(html, 'application/xhtml+xml');
+  if (doc.querySelector('parsererror')) doc = new DOMParser().parseFromString(html, 'text/html');
+  const body = doc.body || doc.documentElement;
+  body.querySelectorAll('script,style,nav,svg,rt').forEach(n => n.remove());
+  const h = body.querySelector('h1,h2,h3');
+  const title = h ? h.textContent.replace(/\s+/g, ' ').trim() : '';
+  body.querySelectorAll('br').forEach(n => n.replaceWith(doc.createTextNode('\n')));
+  body.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li,blockquote,tr,div').forEach(n => n.appendChild(doc.createTextNode('\n')));
+  const paras = body.textContent.split(/\n+/).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return { title, paras };
+}
+
+async function parseEpub(buf){
+  if (!window.JSZip) await loadScript(JSZIP);
+  const zip = await JSZip.loadAsync(buf);
+  const read = async path => {
+    let f = zip.file(path) || zip.file(decodeURIComponent(path));
+    if (!f) throw new Error('EPUB is missing ' + path);
+    return f.async('string');
+  };
+  const container = new DOMParser().parseFromString(await read('META-INF/container.xml'), 'application/xml');
+  const opfPath = container.querySelector('rootfile').getAttribute('full-path');
+  const opf = new DOMParser().parseFromString(await read(opfPath), 'application/xml');
+  const manifest = {};
+  opf.querySelectorAll('manifest > item').forEach(it => { manifest[it.getAttribute('id')] = it; });
+  const base = 'http://epub/' + opfPath.split('/').slice(0, -1).map(encodeURIComponent).join('/') + (opfPath.includes('/') ? '/' : '');
+  const secs = [];
+  const refs = [...opf.querySelectorAll('spine > itemref')];
+  for (let n = 0; n < refs.length; n++){
+    setStatus(`Reading chapter ${n + 1} of ${refs.length}…`);
+    const item = manifest[refs[n].getAttribute('idref')];
+    if (!item) continue;
+    const type = item.getAttribute('media-type') || '';
+    if (!/html|xml/.test(type)) continue;
+    const path = decodeURIComponent(new URL(item.getAttribute('href'), base).pathname.slice(1));
+    let html;
+    try { html = await read(path); } catch(e){ continue; }
+    const { title, paras } = htmlToParas(html);
+    if (paras.join(' ').length < 40) continue;
+    secs.push({ title: title || 'Section ' + (secs.length + 1), paras });
+  }
+  return secs;
+}
+
+/* ---------- document state ---------- */
+async function openFile(file){
+  stopPlayback();
+  setStatus('Opening ' + file.name + '…');
+  try {
+    const buf = await file.arrayBuffer();
+    const isEpub = /\.epub$/i.test(file.name) || file.type === 'application/epub+zip';
+    const isPdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+    if (!isEpub && !isPdf) throw new Error('Please choose a PDF or EPUB file.');
+    const secs = isEpub ? await parseEpub(buf) : await parsePdf(buf);
+    S.segs = []; S.secs = [];
+    for (const s of secs){
+      const si = S.secs.length, start = S.segs.length;
+      for (const p of s.paras) splitSentences(p).forEach((t, k) => S.segs.push({ t, si, para: k === 0 }));
+      if (S.segs.length > start) S.secs.push({ title: s.title, start, end: S.segs.length });
+    }
+    if (!S.segs.length) throw new Error('No readable text found. Scanned or image-only PDFs can’t be read aloud.');
+    S.key = 'pos:' + file.name + ':' + file.size;
+    S.i = Math.min(parseInt(store.get(S.key)) || 0, S.segs.length - 1);
+    S.sec = -1;
+    $('#title').textContent = file.name.replace(/\.(pdf|epub)$/i, '');
+    $('#sec').innerHTML = S.secs.map((s, i) => `<option value="${i}"></option>`).join('');
+    [...$('#sec').options].forEach((o, i) => { o.textContent = S.secs[i].title.slice(0, 60); });
+    document.body.classList.add('loaded');
+    setStatus('');
+    gotoSeg(S.i);
+  } catch (e){
+    setStatus(e.message || String(e), true);
+  }
+}
+
+function showSection(si){
+  S.sec = si;
+  const sec = S.secs[si], box = $('#text');
+  const frag = document.createDocumentFragment();
+  for (let i = sec.start; i < sec.end; i++){
+    const seg = S.segs[i];
+    if (seg.para && i !== sec.start){
+      const br = document.createElement('span'); br.className = 'para'; frag.appendChild(br);
+    }
+    const sp = document.createElement('span');
+    sp.dataset.i = i; sp.textContent = seg.t + ' ';
+    frag.appendChild(sp);
+  }
+  box.replaceChildren(frag);
+  $('#sec').value = si;
+  $('#main').scrollTop = 0;
+}
+function highlight(i){
+  const seg = S.segs[i];
+  if (seg.si !== S.sec) showSection(seg.si);
+  document.querySelectorAll('#text span.cur').forEach(n => n.classList.remove('cur'));
+  const el = document.querySelector(`#text span[data-i="${i}"]`);
+  if (el){ el.classList.add('cur'); el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  $('#prog i').style.width = ((i + 1) / S.segs.length * 100) + '%';
+}
+function gotoSeg(i){
+  i = Math.max(0, Math.min(S.segs.length - 1, i));
+  const was = S.playing;
+  S.i = i; highlight(i); store.set(S.key, String(i));
+  if (was) startPlayback(i);
+}
+
+/* ---------- audio engines ---------- */
+function speakSystem(text){
+  return new Promise((res, rej) => {
+    const u = new SpeechSynthesisUtterance(text);
+    const v = speechSynthesis.getVoices().find(v => v.voiceURI === S.voice.system);
+    if (v){ u.voice = v; u.lang = v.lang; }
+    u.rate = S.rate;
+    u.onend = () => res();
+    u.onerror = e => (e.error === 'canceled' || e.error === 'interrupted') ? res() : rej(new Error('Speech error: ' + e.error));
+    S.utt = u;
+    speechSynthesis.speak(u);
+  });
+}
+
+function audioCtx(){
+  if (!S.ctx) S.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (S.ctx.state === 'suspended') S.ctx.resume();
+  return S.ctx;
+}
+// A silent looping <audio> element makes iOS treat the page as media playback,
+// so Web Audio is not muted by the ring/silent switch.
+function keepAudioSession(on){
+  try {
+    if (on){
+      if (!S.keep){
+        const sr = 8000, n = sr, b = new DataView(new ArrayBuffer(44 + n * 2));
+        const w = (o, s) => [...s].forEach((c, k) => b.setUint8(o + k, c.charCodeAt(0)));
+        w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); b.setUint32(16, 16, true);
+        b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true);
+        b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+        const a = new Audio(URL.createObjectURL(new Blob([b], { type: 'audio/wav' })));
+        a.loop = true; a.volume = 0.01; S.keep = a;
+      }
+      S.keep.play().catch(() => {});
+    } else if (S.keep) S.keep.pause();
+  } catch (e) {}
+}
+
+function ensureKokoro(){
+  if (S.tts) return Promise.resolve(S.tts);
+  if (!S.ttsP){
+    S.ttsP = (async () => {
+      setStatus('Loading AI voice…');
+      const { KokoroTTS } = await import(KOKORO);
+      const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+        dtype: 'q8', device: 'wasm',
+        progress_callback: p => { if (p.status === 'progress') setStatus(`Downloading AI voice… ${Math.round(p.progress || 0)}% (first time only)`); }
+      });
+      S.tts = tts; setStatus('');
+      return tts;
+    })().catch(e => {
+      S.ttsP = null;
+      throw new Error('Could not load the AI voice (' + (e.message || e) + '). If you opened this inside claude.ai, downloads are blocked there. Host this page yourself or switch to iPhone voices.');
+    });
+  }
+  return S.ttsP;
+}
+function genAudio(i){
+  const k = `${S.voice.kokoro}|${S.rate}|${i}`;
+  if (!S.cache.has(k)){
+    const p = S.q = S.q.catch(() => {}).then(async () => (await ensureKokoro()).generate(S.segs[i].t, { voice: S.voice.kokoro, speed: S.rate }));
+    S.cache.set(k, p);
+    p.catch(() => S.cache.delete(k));
+    if (S.cache.size > 6) S.cache.delete(S.cache.keys().next().value);
+  }
+  return S.cache.get(k);
+}
+async function speakKokoro(i, tok){
+  const wait = setTimeout(() => { if (tok === S.token) setStatus('Preparing speech…'); }, 400);
+  let a;
+  try { a = await genAudio(i); } finally { clearTimeout(wait); }
+  if (tok !== S.token) return;
+  setStatus('');
+  if (i + 1 < S.segs.length) genAudio(i + 1).catch(() => {});
+  const ctx = audioCtx();
+  const buf = ctx.createBuffer(1, a.audio.length, a.sampling_rate);
+  buf.copyToChannel(a.audio, 0);
+  await new Promise(res => {
+    const src = ctx.createBufferSource();
+    src.buffer = buf; src.connect(ctx.destination); src.onended = res;
+    S.src = src; src.start();
+  });
+}
+
+/* ---------- playback loop ---------- */
+async function startPlayback(i){
+  const tok = ++S.token;
+  cancelAudio();
+  S.playing = true; S.i = i; updateUI();
+  if (S.engine === 'kokoro'){ audioCtx(); keepAudioSession(true); }
+  try {
+    while (S.playing && tok === S.token && S.i < S.segs.length){
+      highlight(S.i);
+      if (S.engine === 'kokoro') await speakKokoro(S.i, tok);
+      else await speakSystem(S.segs[S.i].t);
+      if (tok !== S.token) return;
+      S.i++;
+      store.set(S.key, String(Math.min(S.i, S.segs.length - 1)));
+    }
+    if (tok === S.token){
+      S.playing = false;
+      if (S.i >= S.segs.length) S.i = S.segs.length - 1;
+      updateUI();
+    }
+  } catch (e){
+    if (tok !== S.token) return;
+    S.playing = false; updateUI(); setStatus(e.message || String(e), true);
+  } finally {
+    if (tok === S.token) keepAudioSession(false);
+  }
+}
+function cancelAudio(){
+  try { speechSynthesis.cancel(); } catch (e){}
+  try { if (S.src){ S.src.onended = null; S.src.stop(); } } catch (e){}
+  S.src = null;
+}
+function stopPlayback(){
+  S.token++; S.playing = false;
+  cancelAudio(); keepAudioSession(false);
+  updateUI();
+}
+function updateUI(){
+  const b = $('#play');
+  b.textContent = S.playing ? '⏸' : '▶';
+  b.setAttribute('aria-label', S.playing ? 'Pause' : 'Play');
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = S.playing ? 'playing' : 'paused';
+}
+
+/* ---------- settings ---------- */
+function sysVoices(){
+  let vs = (window.speechSynthesis ? speechSynthesis.getVoices() : []);
+  const en = vs.filter(v => /^en/i.test(v.lang));
+  vs = en.length ? en : vs;
+  const score = v => /premium/i.test(v.name + v.voiceURI) ? 0 : /enhanced/i.test(v.name + v.voiceURI) ? 1 : 2;
+  return vs.slice().sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name));
+}
+function populateVoices(){
+  const sel = $('#voice');
+  if (S.engine === 'kokoro'){
+    sel.innerHTML = KOKORO_VOICES.map(([id, n]) => `<option value="${id}">${n}</option>`).join('');
+    sel.value = S.voice.kokoro;
+    $('#engineNote').textContent = 'Runs fully on your phone after a one-time download. Speech is generated as you listen, so it can pause briefly between sentences on older iPhones.';
+  } else {
+    const vs = sysVoices();
+    sel.innerHTML = vs.length ? vs.map(v => `<option value="${v.voiceURI}"></option>`).join('') : '<option value="">Default</option>';
+    [...sel.options].forEach((o, k) => { if (vs[k]) o.textContent = `${vs[k].name} (${vs[k].lang})`; });
+    if (vs.length){
+      if (!vs.some(v => v.voiceURI === S.voice.system)){
+        const ava = vs.find(v => /\bava\b/i.test(v.name) && /premium/i.test(v.name + v.voiceURI)) || vs.find(v => /\bava\b/i.test(v.name));
+        S.voice.system = (ava || vs[0]).voiceURI;
+      }
+      sel.value = S.voice.system;
+    }
+    $('#engineNote').textContent = vs.length + ' voices available to Safari. To add better ones: Settings › Accessibility › Spoken Content › Voices.';
+  }
+}
+
+/* ---------- wiring ---------- */
+const fileInput = $('#file');
+$('#openTop').onclick = $('#openBig').onclick = () => fileInput.click();
+fileInput.onchange = () => { if (fileInput.files[0]) openFile(fileInput.files[0]); fileInput.value = ''; };
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files[0]) openFile(e.dataTransfer.files[0]); });
+
+$('#play').onclick = () => { if (S.playing) stopPlayback(); else startPlayback(S.i); };
+$('#prev').onclick = () => gotoSeg(S.i - 1);
+$('#next').onclick = () => gotoSeg(S.i + 1);
+$('#sec').onchange = e => gotoSeg(S.secs[+e.target.value].start);
+$('#text').onclick = e => { const sp = e.target.closest('span[data-i]'); if (sp) gotoSeg(+sp.dataset.i); };
+
+$('#engine').onchange = e => {
+  stopPlayback();
+  S.engine = e.target.value; store.set('engine', S.engine);
+  populateVoices();
+  if (S.engine === 'kokoro') ensureKokoro().catch(err => setStatus(err.message, true));
+  else setStatus('');
+};
+$('#voice').onchange = e => {
+  const wasPlaying = S.playing;
+  if (S.engine === 'kokoro'){ S.voice.kokoro = e.target.value; store.set('v_kokoro', e.target.value); }
+  else { S.voice.system = e.target.value; store.set('v_system', e.target.value); }
+  if (wasPlaying) startPlayback(S.i);
+};
+$('#testVoice').onclick = () => {
+  stopPlayback();
+  if (S.engine !== 'system') { startPlayback(S.i); return; }
+  const v = speechSynthesis.getVoices().find(v => v.voiceURI === S.voice.system);
+  speakSystem('Hello, this is ' + (v ? v.name.replace(/\(.*\)/, '').trim() : 'the default voice') + '.').catch(err => setStatus(err.message, true));
+};
+$('#rate').oninput = e => {
+  S.rate = parseFloat(e.target.value); store.set('rate', String(S.rate));
+  $('#rateLbl').textContent = S.rate.toFixed(1) + '×';
+};
+$('#rate').onchange = () => { if (S.playing) startPlayback(S.i); };
+$('#size').oninput = e => document.documentElement.style.setProperty('--scale', e.target.value);
+
+$('#engine').value = S.engine;
+$('#rate').value = S.rate; $('#rateLbl').textContent = S.rate.toFixed(1) + '×';
+populateVoices();
+if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (S.engine === 'system') populateVoices(); });
+
+if ('mediaSession' in navigator){
+  try {
+    navigator.mediaSession.setActionHandler('play', () => startPlayback(S.i));
+    navigator.mediaSession.setActionHandler('pause', stopPlayback);
+    navigator.mediaSession.setActionHandler('previoustrack', () => gotoSeg(S.i - 1));
+    navigator.mediaSession.setActionHandler('nexttrack', () => gotoSeg(S.i + 1));
+  } catch (e){}
+}
+</script>
+</body>
+</html>
