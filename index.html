@@ -50,7 +50,11 @@ body.loaded footer{display:block}
 #prog{width:100%;height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:10px}
 #prog i{display:block;height:100%;width:0;background:var(--accent)}
 details{margin-top:10px}
-summary{cursor:pointer;color:var(--muted);font-size:14px;min-height:32px;display:flex;align-items:center}
+summary{list-style:none;cursor:pointer;color:var(--fg);font-size:15px;min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+summary::-webkit-details-marker{display:none}
+.chev{width:38px;height:38px;border-radius:50%;background:#2f5d50;border:1px solid rgba(255,255,255,.4);display:grid;place-items:center;flex:none;transition:transform .2s}
+.chev svg{width:20px;height:20px;stroke:#fff;fill:none;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+details[open] .chev{transform:rotate(180deg)}
 .opts{display:grid;grid-template-columns:auto 1fr;gap:10px 12px;align-items:center;font-size:15px;padding-top:6px}
 .opts select,.opts input[type=range]{width:100%;min-height:40px;border-radius:10px;border:1px solid var(--line);background:var(--bg);padding:0 8px}
 .opts input[type=range]{padding:0;border:0;background:none}
@@ -80,7 +84,7 @@ summary{cursor:pointer;color:var(--muted);font-size:14px;min-height:32px;display
   </div>
   <div class="row"><select id="sec" aria-label="Jump to section"></select></div>
   <details>
-    <summary>Voice, speed &amp; text size</summary>
+    <summary><span>Voice, speed &amp; text size</span><span class="chev" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></summary>
     <div class="opts">
       <label for="engine">Engine</label>
       <select id="engine">
